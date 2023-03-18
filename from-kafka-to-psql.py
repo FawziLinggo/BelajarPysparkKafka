@@ -22,7 +22,7 @@ schema_registry_conf = {
     'url': schemaRegistryUrl
 }
 
-topic_name = "cdc.fix..fawzi.dbo.data"
+topic_name = "cdc.fix.fawzi.dbo.data2"
 schema_registry_client = SchemaRegistryClient(schema_registry_conf)
 schema_value = schema_registry_client.get_latest_version(f"{topic_name}-value")
 print(schema_value.schema.schema_str)
@@ -47,21 +47,11 @@ df = spark.readStream.format("kafka") \
 from_avro_options = {"mode": "PERMISSIVE"}
 
 # Condition
-conditition_update = fn.col("op") == "u"
-conditition_delete = fn.col("op") == "d"
-conditition_create = fn.col("op") == "c"
 conditition_not_null_data = fn.col("op") != ""
 
 kafka_raw_df = df.withColumn('topicValue', from_avro(
     fn.expr("substring(value, 6, length(value) - 5)"),
     schema_value.schema.schema_str, from_avro_options)).select('topicValue.*').where(conditition_not_null_data)
-
-## Menampilkan seluruh data create
-# kafka_raw_df.where(conditition_create).writeStream \
-#     .format("console") \
-#     .outputMode("append") \
-#     .start() \
-#     .awaitTermination()
 
 urlPostgre="192.168.35.79"
 portPostgre=5432
@@ -74,6 +64,7 @@ passwordPostgres = "postgres"
 
 # Menulis data ke PostgreSQL menggunakan modul JDBC
 def write_to_postgresql(df, epoch_id):
+    df.show()
     df.write \
         .format("jdbc") \
         .option("url", urlJDBCPostgres) \
@@ -85,7 +76,7 @@ def write_to_postgresql(df, epoch_id):
 
     logging.info("Data berhasil ditulis ke PostgreSQL, dengan data : {}".format(df.collect()))
 
-def delete_from_postgresql(df, epoch_id):
+def proces_rows(df, epoch_id):
     conn = psycopg2.connect(host=urlPostgre,
                             port=portPostgre,
                             dbname=DBPostgre,
@@ -94,25 +85,33 @@ def delete_from_postgresql(df, epoch_id):
     cur = conn.cursor()
     rows = df.rdd.collect()
     num_rows = len(rows)
-    logging.info("Menerima {} baris untuk dihapus".format(num_rows))
+    logging.info("menerima {} row".format(num_rows))
     for row in df.rdd.collect():
-        cur.execute("DELETE FROM {} WHERE id = '{}'".format(tabelPostgres, row.id))
-        logging.info("Data berhasil dihapus dari PostgreSQL, dengan id : {}".format(row.id))
+        print(row)
+        if row.op == "c":
+            after = row.after
+            cur.execute("INSERT INTO {} (id, name, kategory) VALUES ('{}', '{}', '{}')"
+            .format(tabelPostgres, after.id, after.name, after.kategory))
+            logging.info("Data berhasil ditulis ke PostgreSQL, dengan data : {}".format(after))
+        elif row.op == "u":
+            after = row.after
+            before = row.before
+            cur.execute("UPDATE {} SET name = '{}', kategory = '{}' WHERE id = '{}'".format(tabelPostgres, after.name, after.kategory, before.id)) 
+            logging.info("Data berhasil diupdate ke PostgreSQL, dengan data : {}".format(after))
+        elif row.op == "d":
+            before = row.before
+            cur.execute("DELETE FROM {} WHERE id = '{}'".format(tabelPostgres, before.id))
+            logging.info("Data berhasil dihapus dari PostgreSQL, dengan id : {}".format(before.id))
     conn.commit()
     cur.close()
     conn.close()
+    logging.info("Data berhasil ditulis ke PostgreSQL, dengan data : {}".format(df.collect()))
 
 
-## Hanya menampilkan data yang dibuat (create)
-kafka_raw_df.where(conditition_create).select("after.*")\
+# Menghapus data (delete)
+
+kafka_raw_df.where(conditition_not_null_data)\
     .writeStream \
-    .foreachBatch(write_to_postgresql) \
-    .start() \
-    .awaitTermination()
-
-## Menghapus data (delete)
-kafka_raw_df.where(conditition_delete).select("before.*")\
-    .writeStream \
-    .foreachBatch(delete_from_postgresql) \
+    .foreachBatch(proces_rows) \
     .start() \
     .awaitTermination()
