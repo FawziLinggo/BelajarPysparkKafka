@@ -20,3 +20,20 @@ sudo dpkg -i msodbcsql.deb
 ```shell
 odbcinst -q -d
 ```
+
+## install pymongo
+```shell
+pip install pymongo
+```
+
+## running mongo docker
+```shell
+docker run -d -p 27017:27017 --name mongo mongo:4.2
+```
+
+## create database and collection
+```shell
+docker exec -it mongo mongo
+use pyspark
+db.createCollection("from_kafka")
+```

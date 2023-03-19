@@ -1,5 +1,5 @@
 import logging
-import psycopg2
+from pymongo import MongoClient
 import os
 import pyspark.sql.functions as fn
 from pyspark.sql.types import StringType
@@ -53,37 +53,19 @@ kafka_raw_df = df.withColumn('topicValue', from_avro(
     fn.expr("substring(value, 6, length(value) - 5)"),
     schema_value.schema.schema_str, from_avro_options)).select('topicValue.*').where(conditition_not_null_data)
 
-# Konfigurasi PostgreSQL
-urlPostgre="192.168.35.79"
-portPostgre=5432
-DBPostgre="postgres"
-urlJDBCPostgres = f"jdbc:postgresql://{urlPostgre}:{portPostgre}/{DBPostgre}"
-tabelPostgres = "data"
-userPostgres = "postgres"
-passwordPostgres = "postgres"
+# Databases Connection MongoDB
+urlMongoDB = "mongodb://developer.alldataint.com:27017"
+DBMongoDB = "pyspark"
+collectionMongoDB = "from_kafka"
 
-
-# Menulis data ke PostgreSQL menggunakan modul JDBC
-def write_to_postgresql(df, epoch_id):
-    df.show()
-    df.write \
-        .format("jdbc") \
-        .option("url", urlJDBCPostgres) \
-        .option("dbtable", tabelPostgres) \
-        .option("user", userPostgres) \
-        .option("password", passwordPostgres) \
-        .mode("append") \
-        .save()
-
-    logging.info("Data berhasil ditulis ke PostgreSQL, dengan data : {}".format(df.collect()))
 
 def proces_rows(df, epoch_id):
-    conn = psycopg2.connect(host=urlPostgre,
-                            port=portPostgre,
-                            dbname=DBPostgre,
-                            user=userPostgres,
-                            password=passwordPostgres)
-    cur = conn.cursor()
+
+    client = MongoClient(urlMongoDB)
+    db = client[DBMongoDB]
+    collection = db[collectionMongoDB]
+
+
     rows = df.rdd.collect()
     num_rows = len(rows)
     logging.info("menerima {} row".format(num_rows))
@@ -91,25 +73,26 @@ def proces_rows(df, epoch_id):
         print(row)
         if row.op == "c":
             after = row.after
-            cur.execute("INSERT INTO {} (id, name, kategory) VALUES ('{}', '{}', '{}')"
-            .format(tabelPostgres, after.id, after.name, after.kategory))
-            logging.info("Data berhasil ditulis ke PostgreSQL, dengan data : {}".format(after))
+            collection.insert_one(after.asDict())
+            logging.info("Data berhasil ditulis ke MongoDB, dengan data : {}".format(after))
+
         elif row.op == "u":
             after = row.after
             before = row.before
-            cur.execute("UPDATE {} SET name = '{}', kategory = '{}' WHERE id = '{}'".format(tabelPostgres, after.name, after.kategory, before.id)) 
-            logging.info("Data berhasil diupdate ke PostgreSQL, dengan data : {}".format(after))
+            collection.update_one({"id": before.id}, {"$set": after.asDict()})
+            logging.info("Data berhasil diupdate ke MongoDB, dengan data : {}".format(after))
+
         elif row.op == "d":
             before = row.before
-            cur.execute("DELETE FROM {} WHERE id = '{}'".format(tabelPostgres, before.id))
-            logging.info("Data berhasil dihapus dari PostgreSQL, dengan id : {}".format(before.id))
-    conn.commit()
-    cur.close()
-    conn.close()
-    logging.info("Data berhasil ditulis ke PostgreSQL, dengan data : {}".format(df.collect()))
+            collection.delete_one({"id": before.id})
+            logging.info("Data berhasil dihapus ke MongoDB, dengan data : {}".format(before))
 
+    logging.info("Selesai menulis {} row".format(num_rows))
+    client.close()
+    
 
-# Proses data insert, update, delete ke PostgreSQL
+# Menghapus data (delete)
+
 kafka_raw_df.where(conditition_not_null_data)\
     .writeStream \
     .foreachBatch(proces_rows) \
