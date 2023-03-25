@@ -22,14 +22,13 @@ schema_registry_conf = {
     'url': schemaRegistryUrl
 }
 
-topic_name = "cdc.fix.fawzi.dbo.data2"
+topic_name = "cdc.sr.fawzi.dbo.data"
 schema_registry_client = SchemaRegistryClient(schema_registry_conf)
 schema_value = schema_registry_client.get_latest_version(f"{topic_name}-value")
 print(schema_value.schema.schema_str)
 
 spark = SparkSession.builder.master("local[*]") \
     .appName("KafkaSparkStreaming") \
-    .config("spark.driver.extraClassPath", "/home/adi/library/postgresql-42.5.4.jar")\
     .getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 
@@ -41,6 +40,7 @@ df = spark.readStream.format("kafka") \
     .option("subscribe", topic_name) \
     .option("startingOffsets", starting_offset) \
     .option("failOnDataLoss", "false") \
+    .option("checkpointLocation", "checkpoint/mongodb") \
     .load()
 
 # mode Avro
@@ -96,5 +96,6 @@ def proces_rows(df, epoch_id):
 kafka_raw_df.where(conditition_not_null_data)\
     .writeStream \
     .foreachBatch(proces_rows) \
+    .option("checkpointLocation", "checkpoint/mongodb") \
     .start() \
     .awaitTermination()

@@ -1,0 +1,13 @@
+[Unit]
+Description=Spark Streaming Template Service
+After=network.target
+
+[Service]
+Type=simple
+User=<nama_pengguna>
+WorkingDirectory=<direktori_kerja>
+ExecStart=<lokasi_spark_submit> --packages org.apache.spark:spark-streaming-kafka-0-10_2.12:3.2.0,org.apache.spark:spark-sql-kafka-0-10_2.12:3.2.0,org.apache.spark:spark-avro_2.12:3.3.1 <nama-file>.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

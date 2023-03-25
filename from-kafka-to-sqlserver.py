@@ -29,7 +29,6 @@ print(schema_value.schema.schema_str)
 
 spark = SparkSession.builder.master("local[*]") \
     .appName("KafkaSparkStreaming") \
-    .config("spark.driver.extraClassPath", "/home/adi/library/postgresql-42.5.4.jar")\
     .getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 
@@ -41,6 +40,7 @@ df = spark.readStream.format("kafka") \
     .option("subscribe", topic_name) \
     .option("startingOffsets", starting_offset) \
     .option("failOnDataLoss", "false") \
+    .option("checkpointLocation", "checkpoint/mssql") \
     .load()
 
 # mode Avro
@@ -52,8 +52,8 @@ conditition_not_null_data = fn.col("op") != ""
 kafka_raw_df = df.withColumn('topicValue', from_avro(
     fn.expr("substring(value, 6, length(value) - 5)"),
     schema_value.schema.schema_str, from_avro_options)).select('topicValue.*').where(conditition_not_null_data)
-# Databases Connection SQL Server
 
+# Databases Connection SQL Server
 urlSQLServer="192.168.35.80"
 portSQLServer=1433
 DBSQLServer="fawzi"
@@ -108,5 +108,6 @@ def proces_rows(df, epoch_id):
 kafka_raw_df.where(conditition_not_null_data)\
     .writeStream \
     .foreachBatch(proces_rows) \
+    .option("checkpointLocation", "checkpoint/mssql") \
     .start() \
     .awaitTermination()
