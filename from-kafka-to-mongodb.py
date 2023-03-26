@@ -91,7 +91,6 @@ def proces_rows(df, epoch_id):
     client.close()
     
 
-# Menghapus data (delete)
 
 kafka_raw_df.where(conditition_not_null_data)\
     .writeStream \
